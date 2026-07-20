@@ -1,0 +1,10 @@
+# Strands version of the live-media agentic flow
+strands-agents>=0.1.0
+strands-agents-tools>=0.1.0
+boto3>=1.34.0            # AWS Bedrock (Amazon Nova) — the default provider
+# litellm>=1.44.0        # only if you switch to the Gemini-via-LiteLLM model
+# google-genai>=1.0.0    # only if you switch to the native GeminiModel
+
+# Already used by the MCP servers / backend (kept for convenience)
+mcp>=1.2.0
+python-dotenv>=1.0.0

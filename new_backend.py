@@ -190,20 +190,17 @@ def load_latest_metadata():
 
 
 async def run_highlights_orchestrator(prompt: str) -> Dict[str, Any]:
-    from google.adk.runners import InMemoryRunner
-    from orchestrator import orchestrator_agent
+    import asyncio
 
-    runner = InMemoryRunner(agent=orchestrator_agent)
-    events = await runner.run_debug(prompt)
+    from strands_app.orchestrator import run_orchestrator
 
-    texts = []
-    for e in events:
-        if hasattr(e, "text") and e.text:
-            texts.append(e.text)
+    # The Strands orchestrator is synchronous (and opens MCP sessions), so run
+    # it in a worker thread to avoid blocking the FastAPI event loop.
+    raw_text = await asyncio.to_thread(run_orchestrator, prompt)
 
     return {
-        "raw_text": "\n".join(texts),
-        "event_count": len(events),
+        "raw_text": raw_text,
+        "event_count": 1,
     }
 
 

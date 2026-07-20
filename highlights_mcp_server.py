@@ -5,6 +5,7 @@ import os
 import logging
 import time
 import subprocess
+from pathlib import Path
 
 # ---------------- LOGGER ---------------- #
 logging.basicConfig(
@@ -17,9 +18,16 @@ logger = logging.getLogger("highlights-mcp")
 mcp = FastMCP("highlights-tools")
 
 # ---------------- PATHS ---------------- #
-METADATA_PATH = "/home/tummala_venkata/ai_for_live/new_backend/data/segment_metadata.csv"
-VIDEO_DIR = "/home/tummala_venkata/ai_for_live/new_backend/data/videos_mp4"
-OUTPUT_DIR = "/home/tummala_venkata/ai_for_live/new_backend/data/highlights_mp4"
+# Portable: resolve against this file's location (repo root), matching the
+# data/ layout that the segmenter + metadata worker write to. Each can still be
+# overridden with an environment variable for other deployments.
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
+
+METADATA_PATH = os.getenv("METADATA_PATH", str(DATA_DIR / "segment_metadata.csv"))
+VIDEO_DIR = os.getenv("VIDEO_DIR", str(DATA_DIR / "videos_mp4"))
+OUTPUT_DIR = os.getenv("HIGHLIGHTS_DIR", str(DATA_DIR / "highlights_mp4"))
+PERSONA_PATH = os.getenv("PERSONA_PATH", str(BASE_DIR / "persona.json"))
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -71,9 +79,7 @@ def load_metadata():
 @mcp.tool(description="Load personas")
 def load_personas():
     try:
-        persona_path = METADATA_PATH.replace("segment_metadata.csv", "persona.json")
-
-        with open(persona_path, "r") as f:
+        with open(PERSONA_PATH, "r") as f:
             personas = json.load(f)
 
         return personas

@@ -1,0 +1,20 @@
+# ---- Agentic layer (Strands + AWS Bedrock Nova) ----
+strands-agents>=0.1.0
+strands-agents-tools>=0.1.0
+boto3>=1.34.0
+
+# ---- Backend / API ----
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# ---- Ingest + metadata pipeline ----
+pandas>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# ---- MCP tool servers ----
+mcp>=1.2.0
+
+# Optional fallback model providers (uncomment if you switch off Bedrock)
+# litellm>=1.44.0        # Gemini via LiteLLM
+# google-genai>=1.0.0    # native Gemini / Vertex AI

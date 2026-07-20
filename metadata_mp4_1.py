@@ -6,10 +6,8 @@ import re
 import time
 from pathlib import Path
 
-from google import genai
-from google.auth import compute_engine
-from google.auth.transport.requests import Request
-from google.genai.types import GenerateContentConfig, Part
+import boto3
+from botocore.config import Config as BotoConfig
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -18,9 +16,18 @@ CSV_FILE = DATA_DIR / "segment_metadata.csv"
 LATEST_JSON = DATA_DIR / "latest_metadata.json"
 CURRENT_INGEST_FILE = DATA_DIR / "current_ingest.json"
 
-PROJECT_ID = "cmi-cto-bk"
-LOCATION = "us-central1"
-MODEL_ID = "gemini-2.5-flash"
+# ---- AWS Bedrock (Amazon Nova) ----
+# Nova Lite and Nova Pro are multimodal (video-capable); Nova Micro is text-only.
+# Lite is the sensible default for high-volume per-segment analysis; override
+# with BEDROCK_METADATA_MODEL_ID (e.g. us.amazon.nova-pro-v1:0) if you want more
+# accuracy at higher cost.
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+MODEL_ID = os.getenv("BEDROCK_METADATA_MODEL_ID", "us.amazon.nova-lite-v1:0")
+
+# Bedrock Converse accepts inline video bytes only up to a request-size limit.
+# Larger segments fall back to placeholder metadata (or route via S3 — see note
+# in process_segment). 30s "copy"-codec chunks are normally well under this.
+MAX_INLINE_MB = int(os.getenv("MAX_INLINE_VIDEO_MB", "24"))
 
 POLL_INTERVAL = 5
 STABILITY_WAIT = 2
@@ -138,12 +145,16 @@ def build_prompt(sport_type: str) -> str:
 
 def build_client():
     try:
-        client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
-        credentials = compute_engine.Credentials()
-        credentials.refresh(Request())
-        return client
+        # Credentials come from the standard AWS chain (env vars, profile, or
+        # an attached IAM role). Long read timeout because video analysis can
+        # take a while per segment.
+        return boto3.client(
+            "bedrock-runtime",
+            region_name=AWS_REGION,
+            config=BotoConfig(read_timeout=300, retries={"max_attempts": 3}),
+        )
     except Exception as exc:
-        print("Vertex AI client unavailable; using fallback metadata:", exc)
+        print("Bedrock client unavailable; using fallback metadata:", exc)
         return None
 
 
@@ -249,22 +260,36 @@ def process_segment(file_path, index, config):
         with open(file_path, "rb") as f:
             video_bytes = f.read()
 
+        prompt = build_prompt(sport_type)
+
         if client is None:
             metadata = fallback_metadata(segment_name, sport_type)
+        elif len(video_bytes) > MAX_INLINE_MB * 1024 * 1024:
+            # Too large to send inline. To handle big segments, upload to S3 and
+            # replace the "source" below with:
+            #   {"s3Location": {"uri": "s3://bucket/key.mp4"}}
+            print(
+                f"Segment {segment_name} is {len(video_bytes)} bytes "
+                f"(> {MAX_INLINE_MB}MB); using fallback metadata."
+            )
+            metadata = fallback_metadata(segment_name, sport_type)
         else:
-            video_part = Part.from_bytes(data=video_bytes, mime_type="video/mp4")
-            prompt = build_prompt(sport_type)
-
-            response = client.models.generate_content(
-                model=MODEL_ID,
-                contents=[video_part, prompt],
-                config=GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=2048,
-                ),
+            # Bedrock Converse API: a video content block + the text prompt.
+            response = client.converse(
+                modelId=MODEL_ID,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"video": {"format": "mp4", "source": {"bytes": video_bytes}}},
+                            {"text": prompt},
+                        ],
+                    }
+                ],
+                inferenceConfig={"temperature": 0.1, "maxTokens": 2048},
             )
 
-            text = (response.text or "").strip()
+            text = response["output"]["message"]["content"][0]["text"].strip()
             json_text = extract_json(text)
 
             if not json_text:
